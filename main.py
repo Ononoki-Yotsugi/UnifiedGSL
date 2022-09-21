@@ -69,6 +69,7 @@ if __name__ == '__main__':
                              "unless you have re_split=true in the config file)")
     parser.add_argument('--debug', action='store_true')
     parser.add_argument('--verbose', action='store_true')
+    parser.add_argument('--sparse_adj', action='store_true')
     parser.add_argument('--gpu', type=str, default='0', help="Visible GPU")
     args = parser.parse_args()
 

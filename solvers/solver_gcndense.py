@@ -6,7 +6,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch
 from models.GCN3 import GCN
-from utils.utils import normalize, accuracy, set_seed, sample_mask
+from utils.utils import normalize, normalize_sp_tensor, accuracy, set_seed, sample_mask
 from copy import deepcopy
 import time
 import dgl
@@ -29,6 +29,7 @@ class Solver(nn.Module):
         self.args = args
         self.conf = conf
         self.device = torch.device('cuda')
+        self.normalize = normalize_sp_tensor if self.args.sparse_adj else normalize
         self.prepare_data(args.data)
 
     def prepare_data(self, ds_name):
@@ -44,7 +45,10 @@ class Solver(nn.Module):
         self.labels = self.g.ndata['label']
         self.dim_feats = self.feats.shape[1]
         self.n_classes = self.data_raw.num_classes
-        self.adj = self.g.adj().to_dense().to(self.device)
+        if self.args.sparse_adj:
+            self.adj = self.g.adj().to(self.device)
+        else:
+            self.adj = self.g.adj().to_dense().to(self.device)
         self.n_edges = self.g.number_of_edges()
 
     def split_data(self, ds_name, seed):
@@ -83,7 +87,7 @@ class Solver(nn.Module):
         weights = None
         result = {'train': 0, 'valid': 0, 'test': 0}
         best_acc_val = 0
-        normalized_adj = normalize(adj)
+        normalized_adj = self.normalize(adj)
         start_time = time.time()
         for epoch in range(self.conf.n_epochs):
             improve = ''
@@ -150,7 +154,7 @@ class Solver(nn.Module):
 
     def test(self, model, weights):
         model.load_state_dict(weights)
-        normalized_adj = normalize(self.adj)
+        normalized_adj = self.normalize(self.adj)
         return self.evaluate(model, self.test_mask, normalized_adj)
 
 
