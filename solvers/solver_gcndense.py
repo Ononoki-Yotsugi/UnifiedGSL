@@ -22,6 +22,7 @@ from utils.logger import Logger
 split_seeds = [i for i in range(20)]
 train_seeds = [i for i in range(400)]
 
+
 class Solver(nn.Module):
     def __init__(self, args, conf):
         super().__init__()
@@ -58,12 +59,15 @@ class Solver(nn.Module):
             self.train_mask = generate_mask_tensor(sample_mask(train_indices, self.n_nodes)).to(self.device)
             self.val_mask = generate_mask_tensor(sample_mask(val_indices, self.n_nodes)).to(self.device)
             self.test_mask = generate_mask_tensor(sample_mask(test_indices, self.n_nodes)).to(self.device)
-        if ds_name == 'wikics':
-            print(seed)
+        elif ds_name == 'wikics':
             assert seed <= 19 and seed >=0
             self.train_mask = self.g.ndata['train_mask'][:,seed].bool()
             self.val_mask = self.g.ndata['val_mask'][:,seed].bool()
             self.test_mask = self.g.ndata['test_mask'].bool()
+        else:
+            self.train_mask = self.g.ndata['train_mask'].to(self.device)
+            self.val_mask = self.g.ndata['val_mask'].to(self.device)
+            self.test_mask = self.g.ndata['test_mask'].to(self.device)
         self.train_mask = torch.nonzero(self.train_mask, as_tuple=False).squeeze()
         self.val_mask = torch.nonzero(self.val_mask, as_tuple=False).squeeze()
         self.test_mask = torch.nonzero(self.test_mask, as_tuple=False).squeeze()
@@ -86,7 +90,6 @@ class Solver(nn.Module):
         best_val_loss = 10
         weights = None
         result = {'train': 0, 'valid': 0, 'test': 0}
-        best_acc_val = 0
         normalized_adj = self.normalize(adj)
         start_time = time.time()
         for epoch in range(self.conf.n_epochs):
@@ -140,7 +143,7 @@ class Solver(nn.Module):
                 print("Exp {}/{}".format(k, total_runs))
                 set_seed(train_seeds[k])
                 result = self.train_gcn(self.adj)
-                logger.add_result(i * self.args.n_runs + j, result)
+                logger.add_result(k, result)
         logger.print_statistics()
 
     def evaluate(self, model, test_mask, normalized_adj):
