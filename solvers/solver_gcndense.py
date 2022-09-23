@@ -51,6 +51,12 @@ class Solver(nn.Module):
         else:
             self.adj = self.g.adj().to_dense().to(self.device)
         self.n_edges = self.g.number_of_edges()
+        if self.args.verbose:
+            print("""----Data statistics------'
+                #Nodes %d
+                #Edges %d
+                #Classes %d"""%
+                  (self.n_nodes, self.n_edges, self.n_classes))
 
     def split_data(self, ds_name, seed):
         if ds_name in ['coauthorcs', 'coauthorph', 'amazoncom', 'amazonpho'] or self.conf.re_split:
@@ -73,14 +79,11 @@ class Solver(nn.Module):
         self.test_mask = torch.nonzero(self.test_mask, as_tuple=False).squeeze()
 
         if self.args.verbose:
-            print("""----Data statistics------'
-                #Nodes %d
-                #Edges %d
-                #Classes %d
+            print("""----Split statistics------'
                 #Train samples %d
                 #Val samples %d
                 #Test samples %d""" %
-                  (self.n_nodes,self.n_edges, self.n_classes, len(self.train_mask), len(self.val_mask), len(self.test_mask)))
+                  (len(self.train_mask), len(self.val_mask), len(self.test_mask)))
 
     def train_gcn(self, adj):
         model = GCN(self.dim_feats, self.conf.n_hidden, self.n_classes, dropout=self.conf.dropout,
