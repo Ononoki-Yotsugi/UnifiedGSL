@@ -1,5 +1,7 @@
 import numpy as np
 from collections import Counter
+from utils.utils import sparse_mx_to_torch_sparse_tensor
+import scipy.sparse as sp
 
 
 class EstimateAdj:
@@ -8,7 +10,7 @@ class EstimateAdj:
         self.num_node = adj.shape[0]
         self.idx_train = train_mask.cpu().numpy()
         self.label = labels.cpu().numpy()
-        self.adj = adj.cpu().numpy()
+        self.adj = adj.to_dense().cpu().numpy()
 
         self.output = None
         self.iterations = 0
@@ -18,7 +20,7 @@ class EstimateAdj:
         if self.homophily > 0.5:
             # If it is greater than 0.5, E is initialized with the original adjacency matrix
             self.N = 1
-            self.E = adj.cpu().numpy()   # E:(num_node,num_node)
+            self.E = adj.to_dense().cpu().numpy()   # E:(num_node,num_node)
         else:
             # otherwise
             self.N = 0
@@ -156,6 +158,10 @@ class EstimateAdj:
 def prob_to_adj(mx, threshold):
     mx = np.triu(mx, 1)   # the 2 steps here del the self loop
     mx += mx.T
-    adj = np.zeros_like(mx)
-    adj[mx > threshold] = 1
+    (row, col) = np.where(mx > threshold)
+    adj = sp.coo_matrix((np.ones(row.shape[0]), (row, col)), shape=(mx.shape[0], mx.shape[0]), dtype=np.int64)
+    adj = sparse_mx_to_torch_sparse_tensor(adj)
+    # adj = np.zeros_like(mx)
+    # adj[mx > threshold] = 1
+    # adj = sparse_mx_to_torch_sparse_tensor(adj)
     return adj

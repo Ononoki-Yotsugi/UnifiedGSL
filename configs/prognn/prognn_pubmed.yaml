@@ -1,0 +1,25 @@
+re_split: false
+
+lr: 1e-2
+n_epochs: 200
+weight_decay: 5e-4
+patience: 50
+
+backbone: gcn
+n_hidden: 16
+dropout: 0.5
+
+symmetric: true
+lambda_: 0.001
+alpha: 0.3
+beta: 2.5
+gamma: 1
+lr_adj: 1e-2
+inner_steps: 30
+outer_steps: 1
+only_gcn: false
+
+#lpcls: 5
+
+# below is for saving results
+save_graph: false

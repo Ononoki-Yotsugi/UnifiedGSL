@@ -5,9 +5,9 @@ n_epochs: 200
 n_iters: 50
 weight_decay: 5e-4
 
-backbone: gcn
 n_hidden: 16
 dropout: 0.5
+input_dropout: 0.0   # cora:0.8,citeseer:0.0
 
 k: 9
 tolerance: 0.01

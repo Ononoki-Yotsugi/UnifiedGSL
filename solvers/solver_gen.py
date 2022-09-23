@@ -6,11 +6,11 @@ from data import load_dataset
 from data.split import get_split
 from copy import deepcopy
 from models.gen import EstimateAdj, prob_to_adj
-from models.GCN2 import GCN
+from models.GCN3 import GCN
 import torch
 import numpy as np
 import time
-from utils.utils import accuracy, normalize, normalize_sp_tensor, get_node_homophily, set_seed, sample_mask
+from utils.utils import accuracy, normalize_sp_tensor, get_node_homophily, set_seed, sample_mask
 from utils.logger import Logger
 from sklearn.metrics.pairwise import cosine_similarity as cos
 import os
@@ -32,7 +32,7 @@ class Solver(nn.Module):
         self.args = args
         self.conf = conf
         self.device = torch.device('cuda')
-        self.normalize = normalize_sp_tensor if self.args.sparse_adj else normalize
+        self.normalize = normalize_sp_tensor
         self.prepare_data(args.data)
         if conf.save_graph:
             self.graph_loc = 'records/graph/{}_{}.pth'.format(args.solver, args.data)
@@ -52,11 +52,8 @@ class Solver(nn.Module):
         self.labels = self.g.ndata['label']
         self.dim_feats = self.feats.shape[1]
         self.n_classes = self.data_raw.num_classes
-        if self.args.sparse_adj:
-            self.adj = self.g.adj().to(self.device)
-        else:
-            self.adj = self.g.adj().to_dense().to(self.device)
-        self.homophily = get_node_homophily(self.labels.cpu().numpy(), self.adj.cpu().numpy())
+        self.adj = self.g.adj().to(self.device)   # sparse
+        self.homophily = get_node_homophily(self.labels.cpu().numpy(), self.adj.to_dense().cpu().numpy())
         self.n_edges = self.g.number_of_edges()
         if self.args.verbose:
             print("""----Data statistics------'
@@ -107,7 +104,7 @@ class Solver(nn.Module):
         improve_1 = ''
         best_loss_val = 10
         best_acc_val = 0
-        normalized_adj = normalize(adj)
+        normalized_adj = self.normalize(adj)
         for epoch in range(self.conf.n_epochs):
             improve_2 = ''
             t0 = time.time()
@@ -116,7 +113,7 @@ class Solver(nn.Module):
 
             # forward and backward
             hidden_output, output = self.model(self.feats, normalized_adj)
-            loss_train = F.nll_loss(output[self.train_mask], self.labels[self.train_mask])
+            loss_train = F.cross_entropy(output[self.train_mask], self.labels[self.train_mask])
             acc_train = accuracy(output[self.train_mask], self.labels[self.train_mask])
             loss_train.backward()
             self.optim.step()
@@ -138,7 +135,7 @@ class Solver(nn.Module):
                     self.best_iter = iter+1
                     self.best_graph = adj.clone().detach()
                     self.hidden_output = hidden_output
-                    self.output = output
+                    self.output = F.softmax(output, dim=1)
                     self.weights = deepcopy(self.model.state_dict())
 
             # print
@@ -155,7 +152,7 @@ class Solver(nn.Module):
         self.estimator.update_obs(self.knn(self.hidden_output))   # 3
         self.estimator.update_obs(self.knn(self.output))   # 4
         alpha, beta, O, Q, iterations = self.estimator.EM(self.output.max(1)[1].detach().cpu().numpy(), self.conf.tolerance)
-        adj = torch.tensor(prob_to_adj(Q, self.conf.threshold),dtype=torch.float32,device=self.device)
+        adj = prob_to_adj(Q, self.conf.threshold).clone().detach().to(self.device)
         print('Iteration {:04d} | Time(s) {:.4f} | EM step {:04d}'.format(iter+1,time.time()-t,self.estimator.count))
         return adj
 
@@ -183,12 +180,12 @@ class Solver(nn.Module):
             hidden_output, output = self.model(self.feats, normalized_adj)
         logits = output[test_mask]
         labels = self.labels[test_mask]
-        loss=F.nll_loss(logits, labels)
+        loss=F.cross_entropy(logits, labels)
         return loss, accuracy(logits, labels), hidden_output, output
 
     def test(self):
         self.model.load_state_dict(self.weights)
-        normalized_adj = normalize(self.best_graph)
+        normalized_adj = self.normalize(self.best_graph)
         return self.evaluate(self.test_mask, normalized_adj)
 
     def run(self):
@@ -208,13 +205,11 @@ class Solver(nn.Module):
 
     def reset(self):
         # 这里使用reset的方式，否则train_gcn等函数需要大量参数
-        self.model = GCN(self.dim_feats, self.conf.n_hidden, self.n_classes, dropout=self.conf.dropout)
+        self.model = GCN(self.dim_feats, self.conf.n_hidden, self.n_classes, dropout=self.conf.dropout,
+                         input_dropout=self.conf.input_dropout)
         self.model = self.model.to(self.device)
         self.estimator = EstimateAdj(self.n_classes, self.adj, self.train_mask, self.labels, self.homophily)
-
-        self.optim = torch.optim.Adam(self.model.parameters(),
-                                      lr=self.conf.lr,
-                                      weight_decay=self.conf.weight_decay)
+        self.optim = torch.optim.Adam(self.model.parameters(), lr=self.conf.lr, weight_decay=self.conf.weight_decay)
         self.start_time = None
         self.total_time = 0
         self.best_val_loss = 10
