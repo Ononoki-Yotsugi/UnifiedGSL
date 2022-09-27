@@ -1,0 +1,32 @@
+# Training
+lr: 0.01
+weight_decay: 0.0005
+max_iter: 10
+eps_adj: 1e-3
+test_eps_adj: 1e-3
+max_epochs: 10000
+patience: 100
+
+# Regularization
+dropout: 0.5
+feat_adj_dropout: 0
+gl_dropout: 0
+
+# gnn
+n_layers: 2
+hidden_size: 16
+batch_norm: False
+
+# graph learning module
+graph_skip_conn: 0.6
+update_adj_ratio: 0.5
+graph_include_self: False
+smoothness_ratio: 0.4
+degree_ratio: 0
+sparsity_ratio: 0.2
+
+graph_learn_epsilon: 0.3
+graph_learn_epsilon2: 0.3
+graph_learn_topk: null
+graph_learn_topk2: null
+graph_learn_num_pers: 1
