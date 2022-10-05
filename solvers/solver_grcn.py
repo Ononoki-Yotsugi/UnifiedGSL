@@ -3,6 +3,7 @@ import torch.nn.functional as F
 import dgl.data
 from dgl.data.utils import generate_mask_tensor
 from data import load_dataset
+from data.pyg_load import pyg_load_dataset
 from data.split import get_split
 from copy import deepcopy
 from models.grcn import GRCN
@@ -37,22 +38,17 @@ class Solver(nn.Module):
                 os.makedirs('records/graph')
 
     def prepare_data(self, ds_name):
-        if "reload_gs" in self.conf and self.conf.reload_gs:
-            self.data_raw, g = load_dataset(ds_name, reload_gs=True, graph_fn=self.conf.graph_fn)
-        else:
-            self.data_raw, g = load_dataset(ds_name)
-
-        self.g = g.int().to(self.device)
-        self.g = dgl.remove_self_loop(self.g)   # this operation is aimed to get a adj without self loop
-        self.g = dgl.add_self_loop(self.g)   # 这里加上自环，省去对sparse adj加自环
-        self.feats = self.g.ndata['feat']   #这个feats已经经过归一化了
-        self.feats[self.feats>0] = 1   # GRCN中不对特征行归一化，否则无法训练——可能与graph模块有关
+        dataset_raw = pyg_load_dataset(ds_name)
+        self.g = dataset_raw[0]
+        self.feats = self.g.x.to(self.device)   #这个feats已经经过归一化了
         self.n_nodes = self.feats.shape[0]
-        self.labels = self.g.ndata['label']
+        self.labels = self.g.y.to(self.device)
         self.dim_feats = self.feats.shape[1]
-        self.n_classes = self.data_raw.num_classes
-        self.adj = self.g.adj().to(self.device).coalesce()   # sparse
-        self.n_edges = self.g.number_of_edges()
+        self.n_classes = dataset_raw.num_classes
+        loop_edge_index = torch.stack([torch.arange(self.n_nodes), torch.arange(self.n_nodes)])
+        edges = torch.cat([self.g.edge_index, loop_edge_index], dim=1)
+        self.adj = torch.sparse.FloatTensor(edges, torch.ones(edges.shape[1]), [self.n_nodes, self.n_nodes]).to(self.device).coalesce()
+        self.n_edges = self.g.num_edges
         if self.args.verbose:
             print("""----Data statistics------'
                 #Nodes %d
@@ -69,13 +65,13 @@ class Solver(nn.Module):
             self.test_mask = generate_mask_tensor(sample_mask(test_indices, self.n_nodes)).to(self.device)
         elif ds_name == 'wikics':
             assert seed <= 19 and seed >=0
-            self.train_mask = self.g.ndata['train_mask'][:,seed].bool()
-            self.val_mask = self.g.ndata['val_mask'][:,seed].bool()
-            self.test_mask = self.g.ndata['test_mask'].bool()
+            self.train_mask = self.g.train_mask[:,seed].bool()
+            self.val_mask = self.g.val_mask[:,seed].bool()
+            self.test_mask = self.g.test_mask.bool()
         else:
-            self.train_mask = self.g.ndata['train_mask'].to(self.device)
-            self.val_mask = self.g.ndata['val_mask'].to(self.device)
-            self.test_mask = self.g.ndata['test_mask'].to(self.device)
+            self.train_mask = self.g.train_mask.to(self.device)
+            self.val_mask = self.g.val_mask.to(self.device)
+            self.test_mask = self.g.test_mask.to(self.device)
         self.train_mask = torch.nonzero(self.train_mask, as_tuple=False).squeeze()
         self.val_mask = torch.nonzero(self.val_mask, as_tuple=False).squeeze()
         self.test_mask = torch.nonzero(self.test_mask, as_tuple=False).squeeze()
