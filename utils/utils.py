@@ -65,7 +65,8 @@ def normalize(adj):
 def normalize_sp_tensor(adj):
     device = adj.device
     adj = sparse_tensor_to_scipy_sparse(adj)
-    adj = sparse_normalize(adj).to(device)
+    adj = sparse_normalize(adj)
+    adj = sparse_mx_to_torch_sparse_tensor(adj).to(device)
     return adj
 
 def sparse_normalize(adj):
@@ -75,7 +76,7 @@ def sparse_normalize(adj):
     r_inv_sqrt[np.isinf(r_inv_sqrt)] = 0.
     r_mat_inv_sqrt = sp.diags(r_inv_sqrt)
     new = mx.dot(r_mat_inv_sqrt).transpose().dot(r_mat_inv_sqrt)
-    return sparse_mx_to_torch_sparse_tensor(new)
+    return new
 
 def sparse_mx_to_torch_sparse_tensor(sparse_mx):
     """Convert a scipy sparse matrix to a torch sparse tensor."""

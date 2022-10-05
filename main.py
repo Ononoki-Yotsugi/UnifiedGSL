@@ -26,7 +26,7 @@ if __name__ == '__main__':
                         choices=['cora', 'pubmed', 'citeseer', 'raw_cora', 'ogbn-arxiv', 'amazoncom', 'amazonpho',
                                  'coauthorcs', 'coauthorph', 'wikics'], help='dataset')
     parser.add_argument('--solver', type=str, default='gcn',
-                        choices=['gcn', 'gcndense', 'gen', 'GeomGCN', 'prognn', 'GraphSAGE', 'GAug', 'gat', 'idgl', 'SGSL', 'LT', 'LTGSL'], help="The version of solver")
+                        choices=['gcndense', 'gat', 'prognn', 'gen', 'idgl', 'grcn'], help="The version of solver")
     parser.add_argument('--config', type=str, default='configs/gcn/gcn_template.yaml', help="Config file used for specific model training.")
     parser.add_argument('--n_runs', type=int, default=1,
                         help="number of exps per data split")

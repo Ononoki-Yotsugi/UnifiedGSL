@@ -1,0 +1,16 @@
+re_split: false
+
+n_epochs: 300
+lr: 5e-3
+wd: 5e-3
+lr_graph: 1e-3
+
+n_hid: 32
+dropout: 0.5
+hid_graph1: 100
+hid_graph2: 10
+
+K: 150
+normalize: true
+
+save_graph: false

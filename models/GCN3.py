@@ -37,7 +37,7 @@ class GraphConvolution(nn.Module):
             support = torch.spmm(input, self.weight)
         else:
             support = torch.mm(input, self.weight)
-        output = torch.spmm(adj, support)
+        output = torch.sparse.mm(adj, support)
         if self.bias is not None:
             output = output + self.bias
         if self.bn is not None and batch_norm:
