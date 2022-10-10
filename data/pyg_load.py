@@ -6,7 +6,7 @@ feature, which is not supported in dgl.
 from torch_geometric.datasets import Planetoid, CoraFull, Amazon, Coauthor, WikiCS
 
 
-def pyg_load_dataset(name):
+def pyg_load_dataset(name, path='./data/'):
     dic = {'cora': 'Cora',
            'citeseer': 'CiteSeer',
            'pubmed': 'PubMed',
@@ -18,13 +18,13 @@ def pyg_load_dataset(name):
     name = dic[name]
 
     if name in ["Cora", "CiteSeer", "PubMed"]:
-        dataset = Planetoid(root='./data/'+name, name=name)
+        dataset = Planetoid(root=path+name, name=name)
     elif name in ["Computers", "Photo"]:
-        dataset = Amazon(root='./data/'+name, name=name)
+        dataset = Amazon(root=path+name, name=name)
     elif name in ["CS", "Physics"]:
-        dataset = Coauthor(root='./data/'+name, name=name)
+        dataset = Coauthor(root=path+name, name=name)
     elif name in ['WikiCS']:
-        dataset = WikiCS(root='./data/'+name)
+        dataset = WikiCS(root=path+name)
     else:
         exit("wrong dataset")
     return dataset

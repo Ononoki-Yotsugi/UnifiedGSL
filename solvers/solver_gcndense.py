@@ -6,7 +6,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch
 from models.GCN3 import GCN
-from utils.utils import normalize, normalize_sp_tensor, accuracy, set_seed, sample_mask
+from utils.utils import normalize_sp_tensor, accuracy, set_seed, sample_mask
 from copy import deepcopy
 import time
 import dgl
@@ -30,7 +30,7 @@ class Solver(nn.Module):
         self.args = args
         self.conf = conf
         self.device = torch.device('cuda')
-        self.normalize = normalize_sp_tensor if self.args.sparse_adj else normalize
+        self.normalize = normalize_sp_tensor
         self.prepare_data(args.data)
 
     def prepare_data(self, ds_name):
@@ -46,10 +46,7 @@ class Solver(nn.Module):
         self.labels = self.g.ndata['label']
         self.dim_feats = self.feats.shape[1]
         self.n_classes = self.data_raw.num_classes
-        if self.args.sparse_adj:
-            self.adj = self.g.adj().to(self.device)
-        else:
-            self.adj = self.g.adj().to_dense().to(self.device)
+        self.adj = self.g.adj().to(self.device)
         self.n_edges = self.g.number_of_edges()
         if self.args.verbose:
             print("""----Data statistics------'
