@@ -10,10 +10,8 @@ from data.split import get_split
 from models.gat import GAT
 import numpy as np
 import time
-import random
 from utils.utils import accuracy, AverageMeter, sample_mask, set_seed
 from dgl.transforms import AddReverse, ToSimple        # dgl0.9
-# from dgl.transform import add_reverse_edges, to_simple
 from collections import Iterable
 from dgl.data.utils import generate_mask_tensor
 from utils.logger import Logger
@@ -41,35 +39,18 @@ class Solver(nn.Module):
             self.heads = self.conf.num_heads + [self.conf.num_out_heads]
         else:
             self.heads = [self.conf.num_heads] * (self.conf.n_layers-1) + [self.conf.num_out_heads]
-
-        self.use_scheduler = False                    
-        if "scheduler" in self.conf:
-            self.use_scheduler = True
-            if self.conf.scheduler == "MultiStep":
-                self.scheduler = torch.optim.lr_scheduler.MultiStepLR(
-                    optimizer=self.optim,
-                    milestones=self.conf.milestones,
-                    gamma=self.conf.gamma
-                )
-            else:
-                raise ValueError("Scheduler Type {} Has Not Been Supported.".format(self.conf.scheduler))
         
     def prepare_data(self, ds_name):
         if "reload_gs" in self.conf and self.conf.reload_gs:
-            self.data_raw, self.g = load_dataset(ds_name, reload_gs=True, graph_fn=self.conf.graph_fn)
+            self.data_raw, g = load_dataset(ds_name, reload_gs=True, graph_fn=self.conf.graph_fn)
         else:
-            self.data_raw, self.g = load_dataset(ds_name)
-
-        if "to_symmetric" in self.conf and self.conf.to_symmetric:
-            trans1 = AddReverse()
-            trans2 = ToSimple()
-            self.g = trans2(trans1(self.g))  # dgl0.9
-            # self.g = to_simple(add_reverse_edges(self.g))
-
-        if self.conf.self_loop:
-            self.g = dgl.remove_self_loop(self.g)
-            self.g = dgl.add_self_loop(self.g)
-
+            self.data_raw, g = load_dataset(ds_name)
+        if not self.conf.data_cpu:
+            self.g = g.int().to(self.device)
+        else:
+            self.g = g
+        self.g = dgl.remove_self_loop(self.g)  # this operation is aimed to get a adj without self loop
+        self.g = dgl.add_self_loop(self.g)
         self.feats = self.g.ndata['feat']
         self.n_nodes = self.feats.shape[0]
         self.labels = self.g.ndata['label']
@@ -82,23 +63,6 @@ class Solver(nn.Module):
                 #Edges %d
                 #Classes %d"""%
                   (self.n_nodes, self.n_edges, self.n_classes))
-
-        if not self.conf.data_cpu:
-            self.feats = self.feats.to(self.device)
-            self.labels = self.labels.to(self.device)
-
-        if self.conf.batch_size > 0:
-            self.sampler = dgl.dataloading.MultiLayerFullNeighborSampler(self.conf.n_layers)
-            self.dataloader = dgl.dataloading.NodeDataLoader(
-                g=self.g,
-                nids=self.train_nid,
-                block_sampler=self.sampler,
-                device='cpu',
-                batch_size=self.conf.batch_size,
-                shuffle=True,
-                drop_last=False,
-                num_workers=self.conf.num_workers
-            )
 
     def split_data(self, ds_name, seed):
         if ds_name in ['coauthorcs', 'coauthorph', 'amazoncom', 'amazonpho'] or self.conf.re_split:
@@ -119,9 +83,6 @@ class Solver(nn.Module):
         self.train_mask = torch.nonzero(self.train_mask, as_tuple=False).squeeze()
         self.val_mask = torch.nonzero(self.val_mask, as_tuple=False).squeeze()
         self.test_mask = torch.nonzero(self.test_mask, as_tuple=False).squeeze()
-        self.train_nid = torch.nonzero(self.train_mask, as_tuple=True)[0]
-        self.val_nid = torch.nonzero(self.val_mask, as_tuple=True)[0]
-        self.test_nid = torch.nonzero(self.test_mask, as_tuple=True)[0]
 
         if self.args.verbose:
             print("""----Split statistics------'
@@ -131,22 +92,20 @@ class Solver(nn.Module):
                   (len(self.train_mask), len(self.val_mask), len(self.test_mask)))
 
     def train(self):
-        # 这个还有待改动以适应ogbn-arxiv
         if self.conf.batch_size <= 0:
             result = self.train_non_batch()
             return result
-        
-        avg = 0
-        iter_tput = []
+
+        self.reset()
+        self.start_time = time.time()
         losses = AverageMeter()
 
         for epoch in range(self.conf.n_epochs):
-
-            tic = time.time()
+            improve = ''
+            t0 = time.time()
 
             # Loop over the dataloader to sample the computation dependency graph as a list of
             # blocks.
-            tic_step = time.time()
             losses.reset()
 
             for step, (input_nodes, seeds, blocks) in enumerate(self.dataloader):
@@ -157,119 +116,96 @@ class Solver(nn.Module):
 
                 # Compute loss and prediction
                 batch_pred = self.model(blocks, batch_inputs)
-                loss = self.loss_fcn(batch_pred, batch_labels)
+                loss_train = self.loss_fcn(batch_pred, batch_labels)
                 self.optim.zero_grad()
-                loss.backward()
-                losses.update(loss.item())
+                loss_train.backward()
+                losses.update(loss_train.item())
 
                 self.optim.step()
-
-                iter_tput.append(len(seeds) / (time.time() - tic_step))
-                if step % self.conf.log_every == 0:
-                    acc = accuracy(batch_pred, batch_labels)
-                    gpu_mem_alloc = torch.cuda.max_memory_allocated() / 1000000 if torch.cuda.is_available() else 0
-                    print('Epoch {:05d} | Step {:05d} | Loss {:.4f} | Train Acc {:.4f} | Speed (samples/sec) {:.4f} | GPU {:.1f} MB'.format(
-                        epoch, step, losses.avg, acc, np.mean(iter_tput[3:]), gpu_mem_alloc))
-                tic_step = time.time()
 
             if self.use_scheduler:
                 self.scheduler.step()
                 print("Current Learning Rate is {}".format(self.optim.param_groups[0]['lr']))
-            
-            toc = time.time()
-            print('Epoch Time(s): {:.4f}'.format(toc - tic))
-            if epoch >= 5:
-                avg += toc - tic
-            if epoch % self.conf.eval_every == 0 and epoch != 0:
-                val_loss, val_acc = self.evaluate(self.val_mask)
-                print('Eval Acc {:.4f}'.format(val_acc))
 
-                if val_loss < self.best_val_loss:
-                    self.best_val_loss = val_loss
-                    self.weights = deepcopy(self.model.state_dict())
+            loss_val, acc_val = self.evaluate(self.val_mask)
 
-        test_loss, test_acc = self.test()
-        print('Test Acc on Best Val: {:.4f}'.format(test_acc))
-        print('Avg epoch time: {}'.format(avg / (epoch - 4)))
+            if loss_val < self.best_val_loss:
+                improve = '*'
+                self.best_val_loss = loss_val
+                self.result['valid'] = acc_val
+                self.weights = deepcopy(self.model.state_dict())
+                self.total_time = time.time()-self.start_time
+
+            # print
+            if self.args.debug:
+                print(
+                    "Epoch {:05d} | Time(s) {:.4f} | Loss(train) {:.4f} | Loss(val) {:.4f} | Acc(val) {:.4f} | {}".format(
+                        epoch + 1, time.time() - t0, losses.avg, loss_val, acc_val, improve))
+
+        print('Optimization Finished!')
+        print('Time(s): {:.4f}'.format(self.total_time))
+        loss_test, acc_test = self.test()
+        self.result['test'] = acc_test
+        print("Loss(test) {:.4f} | Acc(test) {:.4f}".format(loss_test.item(), acc_test))
+        return self.result
     
     def train_non_batch(self):
-
-        total_time = 0
-        best_val_loss = 10
-        weights = None
-        result = {'train': 0, 'valid': 0, 'test': 0}
-        best_acc_val = 0
-        start_time = time.time()
-
-        model = GAT(g=self.g, num_layers=self.conf.n_layers - 1, in_dim=self.dim_feats, num_hidden=self.conf.n_hidden,
-                    num_classes=self.n_classes, heads=self.heads, activation=F.elu, feat_drop=self.conf.feat_drop,
-                    attn_drop=self.conf.attn_drop, negative_slope=0.2, residual=self.conf.residual).to(self.device)
-        loss_fcn = nn.CrossEntropyLoss()
-        optim = torch.optim.Adam(model.parameters(), lr=self.conf.lr, weight_decay=self.conf.weight_decay)
-
-        self.feats = self.feats.to(self.device)   # 在这里更改solver中的变量应该是不被允许的，这里不会造成负面结果所以例外
-        self.labels = self.labels.to(self.device)
-        self.g = self.g.int().to(self.device)
-
-        speed_stata = AverageMeter()
+        self.reset()
+        self.start_time = time.time()
         for epoch in range(self.conf.n_epochs):
             improve = ''
             t0 = time.time()
 
             # train
-            model.train()
-            pred = model(self.g, self.feats)
-            loss_train = loss_fcn(pred[self.train_mask], self.labels[self.train_mask])
+            self.model.train()
+            pred = self.model(self.g, self.feats)
+            loss_train = self.loss_fcn(pred[self.train_mask], self.labels[self.train_mask])
 
-            optim.zero_grad()
+            self.optim.zero_grad()
             loss_train.backward()
-            optim.step()
+            self.optim.step()
 
             acc_train = accuracy(pred[self.train_mask], self.labels[self.train_mask])
-            gpu_mem_alloc = torch.cuda.max_memory_allocated() / 1000000 if torch.cuda.is_available() else 0
 
             # eval
-            model.eval()
-            pred_val = model([self.g], self.feats)
-            loss_val = loss_fcn(pred_val[self.val_mask], self.labels[self.val_mask]).item()
-            acc_val = accuracy(pred_val[self.val_mask], self.labels[self.val_mask])
+            loss_val, acc_val = self.evaluate(self.val_mask)
+
+            if loss_val < self.best_val_loss:
+                improve = '*'
+                self.best_val_loss = loss_val
+                self.weights = deepcopy(self.model.state_dict())
+                self.result['valid'] = acc_val
+                self.result['train'] = acc_train
+                self.total_time = time.time()-self.start_time
 
             # print
             if self.args.debug:
                 print("Epoch {:05d} | Time(s) {:.4f} | Loss(train) {:.4f} | Acc(train) {:.4f} | Loss(val) {:.4f} | Acc(val) {:.4f} | {}".format(
                     epoch + 1, time.time() - t0, loss_train.item(), acc_train, loss_val, acc_val, improve))
-            
-            if loss_val < best_val_loss:
-                improve = '*'
-                best_val_loss = loss_val
-                weights = deepcopy(model.state_dict())
-                result['valid'] = acc_val
-                result['train'] = acc_train
-                total_time = time.time()-start_time
 
         print('Optimization Finished!')
-        print('Time(s): {:.4f}'.format(total_time))
-        loss_test, acc_test = self.test(model, weights)
-        result['test'] = acc_test
+        print('Time(s): {:.4f}'.format(self.total_time))
+        loss_test, acc_test = self.test()
+        self.result['test'] = acc_test
         print("Loss(test) {:.4f} | Acc(test) {:.4f}".format(loss_test.item(), acc_test))
-        return result
+        return self.result
 
-    def evaluate(self, model, test_mask):
-        model.eval()
+    def evaluate(self, test_mask):
+        self.model.eval()
         with torch.no_grad():
             if self.conf.batch_size < 0:
-                logits = model(self.g, self.feats).cpu()
+                logits = self.model(self.g, self.feats).cpu()
             else:
-                logits = model.inference(self.g, self.feats, self.device, self.conf.batch_size, self.conf.num_workers)
-        model.train()
+                logits = self.model.inference(self.g, self.feats, self.device, self.conf.batch_size, self.conf.num_workers)
+        self.model.train()
         logits = logits[test_mask]
         labels = self.labels[test_mask].cpu()
         loss = F.cross_entropy(logits, labels)
         return loss, accuracy(logits, labels)
 
-    def test(self, model, weights):
-        model.load_state_dict(weights)
-        return self.evaluate(model, self.test_mask)
+    def test(self):
+        self.model.load_state_dict(self.weights)
+        return self.evaluate(self.test_mask)
 
     def run(self):
         total_runs = self.args.n_runs * self.args.n_splits
@@ -285,3 +221,38 @@ class Solver(nn.Module):
                 result = self.train()
                 logger.add_result(k, result)
         logger.print_statistics()
+
+    def reset(self):
+        self.model = GAT(g=self.g, num_layers=self.conf.n_layers - 1, in_dim=self.dim_feats, num_hidden=self.conf.n_hidden,
+                    num_classes=self.n_classes, heads=self.heads, activation=F.elu, feat_drop=self.conf.feat_drop,
+                    attn_drop=self.conf.attn_drop, negative_slope=0.2, residual=self.conf.residual).to(self.device)
+        self.optim = torch.optim.Adam(self.model.parameters(), lr=self.conf.lr, weight_decay=self.conf.weight_decay)
+        self.loss_fcn = nn.CrossEntropyLoss()
+        self.use_scheduler = False
+        if "scheduler" in self.conf:
+            self.use_scheduler = True
+            if self.conf.scheduler == "MultiStep":
+                self.scheduler = torch.optim.lr_scheduler.MultiStepLR(
+                    optimizer=self.optim,
+                    milestones=self.conf.milestones,
+                    gamma=self.conf.gamma
+                )
+            else:
+                raise ValueError("Scheduler Type {} Has Not Been Supported.".format(self.conf.scheduler))
+        self.start_time = None
+        self.total_time = 0
+        self.best_val_loss = 10
+        self.weights = None
+        self.result = {'train': 0, 'valid': 0, 'test': 0}
+        if self.conf.batch_size > 0:
+            self.sampler = dgl.dataloading.MultiLayerFullNeighborSampler(self.conf.n_layers)
+            self.dataloader = dgl.dataloading.NodeDataLoader(
+                graph=self.g,
+                indices=self.train_mask,
+                graph_sampler=self.sampler,
+                device='cpu',
+                batch_size=self.conf.batch_size,
+                shuffle=True,
+                drop_last=False,
+                num_workers=self.conf.num_workers
+            )

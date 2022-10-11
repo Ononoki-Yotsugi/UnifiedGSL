@@ -38,7 +38,6 @@ def load_ogb(name):
     trans1 = AddReverse()
     trans2 = ToSimple()
     graph = trans2(trans1(graph))  # dgl0.9
-        # self.g = to_simple(add_reverse_edges(self.g))
     
     print('finish constructing', name)
 

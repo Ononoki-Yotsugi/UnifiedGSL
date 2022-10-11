@@ -59,8 +59,6 @@ class GAT(nn.Module):
         return logits
 
     def inference(self, g, x, device, batch_size, num_workers):
-        print()
-        print("{} Layers to be Evaluated ...".format(len(self.gat_layers)))
 
         i = 0
         for l, layer in enumerate(self.gat_layers):
@@ -77,7 +75,6 @@ class GAT(nn.Module):
                 drop_last=False,
                 num_workers=num_workers)
 
-            print("Forwarding Layer {} ...".format(l))
             for input_nodes, output_nodes, blocks in dataloader:
                 block = blocks[0]
 

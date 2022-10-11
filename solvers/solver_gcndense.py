@@ -1,4 +1,3 @@
-import random
 import numpy as np
 from data import load_dataset
 from data.split import get_split

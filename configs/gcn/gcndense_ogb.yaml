@@ -1,0 +1,23 @@
+re_split: false
+
+lr: 5e-3
+n_epochs: 300
+weight_decay: 0
+
+n_hidden: 256
+n_layers: 3
+dropout: 0.5
+input_dropout: 0.0   # cora:0.8,citeseer:0.0
+norm: true
+
+self_loop: true
+to_symmetric: true
+
+#lpcls: 0
+
+# below is for graph reloading option
+# reload_gs: false
+# graph_fn: data/g_struct/example/cora_raw.pth
+
+# below is for random feature testing
+#random_feature: true
