@@ -37,6 +37,7 @@ if __name__ == '__main__':
     parser.add_argument('--verbose', action='store_true')
     parser.add_argument('--sparse_adj', action='store_true')
     parser.add_argument('--gpu', type=str, default='0', help="Visible GPU")
+    parser.add_argument('--data_load', type=str, default='dgl', choices=['dgl', 'pyg'])
     args = parser.parse_args()
 
     os.environ['CUDA_VISIBLE_DEVICES'] = str(args.gpu)

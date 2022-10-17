@@ -1,3 +1,5 @@
+re_split: false
+
 # Training
 lr: 0.01
 weight_decay: 0.0005
@@ -13,7 +15,7 @@ feat_adj_dropout: 0
 gl_dropout: 0
 
 # gnn
-scalable_run: True
+scalable_run: true
 num_anchors: 700
 n_layers: 2
 hidden_size: 16

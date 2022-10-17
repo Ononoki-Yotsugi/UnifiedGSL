@@ -1,93 +1,21 @@
-import torch.nn as nn
 import torch.nn.functional as F
-import dgl.data
-from dgl.data.utils import generate_mask_tensor
-from data import load_dataset
-from data.split import get_split
 from copy import deepcopy
 from models.gen import EstimateAdj, prob_to_adj
 from models.GCN3 import GCN
 import torch
 import numpy as np
 import time
-from utils.utils import accuracy, normalize_sp_tensor, get_node_homophily, set_seed, sample_mask
-from utils.logger import Logger
+from utils.utils import accuracy, normalize_sp_tensor, get_node_homophily
 from sklearn.metrics.pairwise import cosine_similarity as cos
-import os
-
-# split_seeds = [0,1,2,3,4]
-# train_seeds = [0,1,2,3,4,5,6,7,8,9,
-#                10,11,12,13,14,15,16,17,18,19,
-#                20,21,22,23,24,25,26,27,28,29,
-#                30,31,32,33,34,35,36,37,38,39,
-#                40,41,42,43,44,45,46,47,48,49]
-split_seeds = [i for i in range(20)]
-train_seeds = [i for i in range(400)]
+from .solver import BaseSolver
 
 
-class Solver(nn.Module):
+class Solver(BaseSolver):
     def __init__(self, args, conf):
-        super().__init__()
+        super().__init__(args, conf)
         print("Solver Version : [{}]".format("gen"))
-        self.args = args
-        self.conf = conf
-        self.device = torch.device('cuda')
         self.normalize = normalize_sp_tensor
-        self.prepare_data(args.data)
-        if conf.save_graph:
-            self.graph_loc = 'records/graph/{}_{}.pth'.format(args.solver, args.data)
-            if not os.path.exists('records/graph'):
-                os.makedirs('records/graph')
-
-    def prepare_data(self, ds_name):
-        if "reload_gs" in self.conf and self.conf.reload_gs:
-            self.data_raw, g = load_dataset(ds_name, reload_gs=True, graph_fn=self.conf.graph_fn)
-        else:
-            self.data_raw, g = load_dataset(ds_name)
-
-        self.g = g.int().to(self.device)
-        self.g = dgl.remove_self_loop(self.g)   # this operation is aimed to get a adj without self loop
-        self.feats = self.g.ndata['feat']   #这个feats已经经过归一化了
-        self.n_nodes = self.feats.shape[0]
-        self.labels = self.g.ndata['label']
-        self.dim_feats = self.feats.shape[1]
-        self.n_classes = self.data_raw.num_classes
-        self.adj = self.g.adj().to(self.device)   # sparse
         self.homophily = get_node_homophily(self.labels.cpu().numpy(), self.adj.to_dense().cpu().numpy())
-        self.n_edges = self.g.number_of_edges()
-        if self.args.verbose:
-            print("""----Data statistics------'
-                #Nodes %d
-                #Edges %d
-                #Classes %d"""%
-                  (self.n_nodes, self.n_edges, self.n_classes))
-
-    def split_data(self, ds_name, seed):
-        if ds_name in ['coauthorcs', 'coauthorph', 'amazoncom', 'amazonpho'] or self.conf.re_split:
-            np.random.seed(seed)
-            train_indices, val_indices, test_indices = get_split(self.labels.cpu().numpy(),20,30)   # 默认采取20-30-rest这种划分
-            self.train_mask = generate_mask_tensor(sample_mask(train_indices, self.n_nodes)).to(self.device)
-            self.val_mask = generate_mask_tensor(sample_mask(val_indices, self.n_nodes)).to(self.device)
-            self.test_mask = generate_mask_tensor(sample_mask(test_indices, self.n_nodes)).to(self.device)
-        elif ds_name == 'wikics':
-            assert seed <= 19 and seed >=0
-            self.train_mask = self.g.ndata['train_mask'][:,seed].bool()
-            self.val_mask = self.g.ndata['val_mask'][:,seed].bool()
-            self.test_mask = self.g.ndata['test_mask'].bool()
-        else:
-            self.train_mask = self.g.ndata['train_mask'].to(self.device)
-            self.val_mask = self.g.ndata['val_mask'].to(self.device)
-            self.test_mask = self.g.ndata['test_mask'].to(self.device)
-        self.train_mask = torch.nonzero(self.train_mask, as_tuple=False).squeeze()
-        self.val_mask = torch.nonzero(self.val_mask, as_tuple=False).squeeze()
-        self.test_mask = torch.nonzero(self.test_mask, as_tuple=False).squeeze()
-
-        if self.args.verbose:
-            print("""----Split statistics------'
-                #Train samples %d
-                #Val samples %d
-                #Test samples %d""" %
-                  (len(self.train_mask), len(self.val_mask), len(self.test_mask)))
 
     def knn(self, feature):
         # Generate a knn graph for input feature matrix. Note that the graph contains self loop.
@@ -170,8 +98,6 @@ class Solver(nn.Module):
         loss_test, acc_test, _, _ = self.test()
         self.result['test'] = acc_test
         print("Loss(test) {:.4f} | Acc(test) {:.4f}".format(loss_test.item(), acc_test))
-        if self.conf.save_graph:
-            torch.save(self.best_graph.cpu(), self.graph_loc)
         return self.result
 
     def evaluate(self, test_mask, normalized_adj):
@@ -187,21 +113,6 @@ class Solver(nn.Module):
         self.model.load_state_dict(self.weights)
         normalized_adj = self.normalize(self.best_graph)
         return self.evaluate(self.test_mask, normalized_adj)
-
-    def run(self):
-        total_runs = self.args.n_runs * self.args.n_splits
-        assert self.args.n_splits <= len(split_seeds)
-        assert total_runs <= len(train_seeds)
-        logger = Logger(runs=total_runs)
-        for i in range(self.args.n_splits):
-            self.split_data(self.args.data, split_seeds[i])   # split the data
-            for j in range(self.args.n_runs):
-                k = i * self.args.n_runs + j
-                print("Exp {}/{}".format(k, total_runs))
-                set_seed(train_seeds[k])
-                result = self.train()
-                logger.add_result(k, result)
-        logger.print_statistics()
 
     def reset(self):
         # 这里使用reset的方式，否则train_gcn等函数需要大量参数

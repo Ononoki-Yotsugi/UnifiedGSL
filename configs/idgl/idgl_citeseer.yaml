@@ -6,6 +6,7 @@ eps_adj: 1e-3
 test_eps_adj: 1e-3
 max_epochs: 10000
 patience: 100
+scalable_run: false
 
 # Regularization
 dropout: 0.5

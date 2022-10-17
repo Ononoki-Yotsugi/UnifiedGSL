@@ -1,92 +1,20 @@
-import numpy as np
-import torch.nn as nn
 import torch.nn.functional as F
-import dgl.data
-from dgl.data.utils import generate_mask_tensor
-from data import load_dataset
-from data.split import get_split
 from copy import deepcopy
 import torch.optim as optim
 from models.GCN2 import GCN
 from models.prognn import PGD, prox_operators, EstimateAdj, feature_smoothing
 import torch
 import time
-from utils.utils import accuracy, set_seed, sample_mask
-from utils.logger import Logger
-import os
-
-# split_seeds = [0,1,2,3,4]
-# train_seeds = [0,1,2,3,4,5,6,7,8,9,
-#                10,11,12,13,14,15,16,17,18,19,
-#                20,21,22,23,24,25,26,27,28,29,
-#                30,31,32,33,34,35,36,37,38,39,
-#                40,41,42,43,44,45,46,47,48,49]
-split_seeds = [i for i in range(20)]
-train_seeds = [i for i in range(400)]
+from utils.utils import accuracy
+from .solver import BaseSolver
 
 
-class Solver(nn.Module):
+class Solver(BaseSolver):
     def __init__(self, args, conf):
-        super().__init__()
+        super().__init__(args, conf)
         print("Solver Version : [{}]".format("prognn"))
-        self.args = args
-        self.conf = conf
-        self.device = torch.device('cuda')
-        self.prepare_data(args.data)
-        if conf.save_graph:
-            self.graph_loc = 'records/graph/{}_{}.pth'.format(args.solver, args.data)
-            if not os.path.exists('records/graph'):
-                os.makedirs('records/graph')
+        self.adj = self.adj.to_dense()
 
-    def prepare_data(self, ds_name):
-        if "reload_gs" in self.conf and self.conf.reload_gs:
-            self.data_raw, g = load_dataset(ds_name, reload_gs=True, graph_fn=self.conf.graph_fn)
-        else:
-            self.data_raw, g = load_dataset(ds_name)
-        
-        self.g = g.int().to(self.device)
-        self.g = dgl.remove_self_loop(self.g)
-
-        self.adj = self.g.adj().to_dense().to(self.device)   # dense
-        self.feats = self.g.ndata['feat']
-        self.n_nodes = self.feats.shape[0]
-        self.labels = self.g.ndata['label']
-        self.dim_feats = self.feats.shape[1]
-        self.n_classes = self.data_raw.num_classes
-        self.n_edges = self.g.number_of_edges()
-        if self.args.verbose:
-            print("""----Data statistics------'
-                #Nodes %d
-                #Edges %d
-                #Classes %d"""%
-                  (self.n_nodes, self.n_edges, self.n_classes))
-
-    def split_data(self, ds_name, seed):
-        if ds_name in ['coauthorcs', 'coauthorph', 'amazoncom', 'amazonpho'] or self.conf.re_split:
-            np.random.seed(seed)
-            train_indices, val_indices, test_indices = get_split(self.labels.cpu().numpy(),20,30)   # 默认采取20-30-rest这种划分
-            self.train_mask = generate_mask_tensor(sample_mask(train_indices, self.n_nodes)).to(self.device)
-            self.val_mask = generate_mask_tensor(sample_mask(val_indices, self.n_nodes)).to(self.device)
-            self.test_mask = generate_mask_tensor(sample_mask(test_indices, self.n_nodes)).to(self.device)
-        elif ds_name == 'wikics':
-            assert seed <= 19 and seed >=0
-            self.train_mask = self.g.ndata['train_mask'][:,seed].bool()
-            self.val_mask = self.g.ndata['val_mask'][:,seed].bool()
-            self.test_mask = self.g.ndata['test_mask'].bool()
-        else:
-            self.train_mask = self.g.ndata['train_mask'].to(self.device)
-            self.val_mask = self.g.ndata['val_mask'].to(self.device)
-            self.test_mask = self.g.ndata['test_mask'].to(self.device)
-        self.train_mask = torch.nonzero(self.train_mask, as_tuple=False).squeeze()
-        self.val_mask = torch.nonzero(self.val_mask, as_tuple=False).squeeze()
-        self.test_mask = torch.nonzero(self.test_mask, as_tuple=False).squeeze()
-
-        if self.args.verbose:
-            print("""----Split statistics------'
-                #Train samples %d
-                #Val samples %d
-                #Test samples %d""" %
-                  (len(self.train_mask), len(self.val_mask), len(self.test_mask)))
 
     def train_gcn(self, epoch):
         normalized_adj = self.estimator.normalize()
@@ -118,8 +46,9 @@ class Solver(nn.Module):
             self.weights = deepcopy(self.model.state_dict())
 
         #print
-        print("Epoch {:05d} | Time(s) {:.4f} | Loss(train) {:.4f} | Acc(train) {:.4f} | Loss(val) {:.4f} | Acc(val) {:.4f} | {}".format(
-            epoch+1, time.time() -t, loss_train.item(), acc_train, loss_val, acc_val, improve))
+        if self.args.debug:
+            print("Epoch {:05d} | Time(s) {:.4f} | Loss(train) {:.4f} | Acc(train) {:.4f} | Loss(val) {:.4f} | Acc(val) {:.4f} | {}".format(
+                epoch+1, time.time() -t, loss_train.item(), acc_train, loss_val, acc_val, improve))
 
     def train_adj(self, epoch):
         estimator = self.estimator
@@ -182,21 +111,19 @@ class Solver(nn.Module):
             self.weights = deepcopy(self.model.state_dict())
 
         #print
-        print("Epoch {:05d} | Time(s) {:.4f} | Loss(adj) {:.4f} | Loss(val) {:.4f} | Acc(val) {:.4f} | {}".format(
-            epoch+1, time.time() - t, total_loss.item(), loss_val, acc_val, improve))
+        if self.args.debug:
+            print("Epoch {:05d} | Time(s) {:.4f} | Loss(adj) {:.4f} | Loss(val) {:.4f} | Acc(val) {:.4f} | {}".format(
+                epoch+1, time.time() - t, total_loss.item(), loss_val, acc_val, improve))
 
     def train(self):
         self.reset()
         self.start_time = time.time()
         for epoch in range(self.conf.n_epochs):
-            if self.conf.only_gcn:
-                self.train_gcn(epoch)
-            else:
-                for i in range(int(self.conf.outer_steps)):
-                    self.train_adj(epoch)
+            for i in range(int(self.conf.outer_steps)):
+                self.train_adj(epoch)
 
-                for i in range(int(self.conf.inner_steps)):
-                    self.train_gcn(epoch)
+            for i in range(int(self.conf.inner_steps)):
+                self.train_gcn(epoch)
             if self.improve:
                 self.wait = 0
                 self.improve = False
@@ -211,8 +138,6 @@ class Solver(nn.Module):
         loss_test, acc_test = self.test()
         self.result['test'] = acc_test
         print("Loss(test) {:.4f} | Acc(test) {:.4f}".format(loss_test.item(), acc_test))
-        if self.conf.save_graph:
-            torch.save(self.best_graph.cpu(), self.graph_loc)
         return self.result
 
     def evaluate(self, test_mask, normalized_adj):
@@ -230,21 +155,6 @@ class Solver(nn.Module):
         self.estimator.estimated_adj.data.copy_(self.best_graph)
         normalized_adj = self.estimator.normalize()
         return self.evaluate(self.test_mask, normalized_adj)
-
-    def run(self):
-        total_runs = self.args.n_runs * self.args.n_splits
-        assert self.args.n_splits <= len(split_seeds)
-        assert total_runs <= len(train_seeds)
-        logger = Logger(runs=total_runs)
-        for i in range(self.args.n_splits):
-            self.split_data(self.args.data, split_seeds[i])  # split the data
-            for j in range(self.args.n_runs):
-                k = i * self.args.n_runs + j
-                print("Exp {}/{}".format(k, total_runs))
-                set_seed(train_seeds[k])
-                result = self.train()
-                logger.add_result(k, result)
-        logger.print_statistics()
 
     def reset(self):
         self.model = GCN(self.dim_feats, self.conf.n_hidden, self.n_classes, dropout=self.conf.dropout)
