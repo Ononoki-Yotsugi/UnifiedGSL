@@ -17,8 +17,9 @@ class BaseSolver(nn.Module):
         self.conf = conf
         self.device = torch.device('cuda')
         self.prepare_data(args.data, mode=self.args.data_load)
-        self.split_seeds = [i for i in range(20)]
+        # self.split_seeds = [i for i in range(20)]
         self.train_seeds = [i for i in range(400)]
+        self.split_seeds = [103,219,977,678,527,549,368,945,573,920]
 
     def prepare_data(self, ds_name, mode='dgl'):
         if mode =='pyg':
@@ -58,7 +59,7 @@ class BaseSolver(nn.Module):
     def split_data(self, ds_name, seed, mode='dgl'):
         if ds_name in ['coauthorcs', 'coauthorph', 'amazoncom', 'amazonpho']:
             np.random.seed(seed)
-            train_indices, val_indices, test_indices = get_split(self.labels.cpu().numpy(), 20, 30)  # 默认采取20-30-rest这种划分
+            train_indices, val_indices, test_indices = get_split(self.labels.cpu().numpy(), test_examples_per_class=30, val_examples_per_class=30)  # 默认采取20-30-rest这种划分
             self.train_mask = generate_mask_tensor(sample_mask(train_indices, self.n_nodes))
             self.val_mask = generate_mask_tensor(sample_mask(val_indices, self.n_nodes))
             self.test_mask = generate_mask_tensor(sample_mask(test_indices, self.n_nodes))
@@ -75,7 +76,7 @@ class BaseSolver(nn.Module):
         elif ds_name in ['cora', 'citeseer', 'pubmed']:
             if 're_split' in self.conf and self.conf.re_split:
                 np.random.seed(seed)
-                train_indices, val_indices, test_indices = get_split(self.labels.cpu().numpy(), 20, 30)  # 默认采取20-30-rest这种划分
+                train_indices, val_indices, test_indices = get_split(self.labels.cpu().numpy(), train_examples_per_class=20, val_size=500,test_size=1000)
                 self.train_mask = generate_mask_tensor(sample_mask(train_indices, self.n_nodes))
                 self.val_mask = generate_mask_tensor(sample_mask(val_indices, self.n_nodes))
                 self.test_mask = generate_mask_tensor(sample_mask(test_indices, self.n_nodes))
@@ -111,6 +112,24 @@ class BaseSolver(nn.Module):
                 #Test samples %d""" %
                   (len(self.train_mask), len(self.val_mask), len(self.test_mask)))
 
+    def split_data_v2(self, seed):
+        self.train_mask = torch.zeros(self.n_nodes).type(torch.bool)
+        self.val_mask = torch.zeros(self.n_nodes).type(torch.bool)
+        self.test_mask = torch.zeros(self.n_nodes).type(torch.bool)
+        inds = np.arange(self.n_nodes)
+        np.random.seed(seed)
+        np.random.shuffle(inds)
+        inds = torch.tensor(inds).long()
+        data_y_shuffle = self.labels[inds]
+        for i in range(self.n_classes):
+            inds_i = inds[data_y_shuffle == i]
+            self.train_mask[inds_i[:20]] = 1
+        val_test_inds = np.arange(self.n_nodes)[self.train_mask.numpy() == 0]
+        np.random.shuffle(val_test_inds)
+        val_test_inds = torch.tensor(val_test_inds).long()
+        self.val_mask[val_test_inds[:500]] = 1
+        self.test_mask[val_test_inds[500:1500]] = 1
+
     def run(self):
         total_runs = self.args.n_runs * self.args.n_splits
         assert self.args.n_splits <= len(self.split_seeds)
@@ -118,6 +137,7 @@ class BaseSolver(nn.Module):
         logger = Logger(runs=total_runs)
         for i in range(self.args.n_splits):
             self.split_data(self.args.data, self.split_seeds[i], mode=self.args.data_load)   # split the data
+            # self.split_data_v2(self.split_seeds[i])
             for j in range(self.args.n_runs):
                 k = i * self.args.n_runs + j
                 print("Exp {}/{}".format(k, total_runs))

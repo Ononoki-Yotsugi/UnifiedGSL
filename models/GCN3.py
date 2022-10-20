@@ -68,6 +68,7 @@ class GCN(nn.Module):
         self.nclass = nclass
         self.n_layers = n_layers
         self.convs = nn.ModuleList()
+        self.linear = nn.ModuleList()
         if norm:
             self.norms = nn.ModuleList()
         else:
@@ -93,7 +94,7 @@ class GCN(nn.Module):
         for i, layer in enumerate(self.convs):
             conv = layer(x,adj)
             if self.use_linear:
-                linear = self.linear[i][x]
+                linear = self.linear[i](x)
                 x = conv+linear
             else:
                 x = conv

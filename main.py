@@ -26,7 +26,7 @@ if __name__ == '__main__':
                         choices=['cora', 'pubmed', 'citeseer', 'raw_cora', 'ogbn-arxiv', 'amazoncom', 'amazonpho',
                                  'coauthorcs', 'coauthorph', 'wikics'], help='dataset')
     parser.add_argument('--solver', type=str, default='gcn',
-                        choices=['gcndense', 'gat', 'prognn', 'gen', 'idgl', 'grcn'], help="The version of solver")
+                        choices=['gcndense', 'gat', 'prognn', 'gen', 'idgl', 'grcn', 'bcgsl'], help="The version of solver")
     parser.add_argument('--config', type=str, default='configs/gcn/gcn_template.yaml', help="Config file used for specific model training.")
     parser.add_argument('--n_runs', type=int, default=1,
                         help="number of exps per data split")
@@ -35,7 +35,6 @@ if __name__ == '__main__':
                              "unless you have re_split=true in the config file)")
     parser.add_argument('--debug', action='store_true')
     parser.add_argument('--verbose', action='store_true')
-    parser.add_argument('--sparse_adj', action='store_true')
     parser.add_argument('--gpu', type=str, default='0', help="Visible GPU")
     parser.add_argument('--data_load', type=str, default='dgl', choices=['dgl', 'pyg'])
     args = parser.parse_args()

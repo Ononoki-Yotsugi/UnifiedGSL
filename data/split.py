@@ -22,16 +22,23 @@ def sample_per_class(labels, num_examples_per_class, forbidden_indices=None):
          for class_index in range(len(sample_indices_per_class))
          ])
 
-def get_split(labels, train_examples_per_class=None, val_examples_per_class=None, test_examples_per_class=None, test_size=None):
+def get_split(labels, train_examples_per_class=None, val_examples_per_class=None, test_examples_per_class=None,
+              train_size=None, val_size=None, test_size=None):
     num_samples = len(labels)
     num_classes = labels.max() + 1
     remaining_indices = list(range(num_samples))
 
     if train_examples_per_class is not None:
         train_indices = sample_per_class(labels, train_examples_per_class)
+    else:
+        # select train examples with no respect to class distribution
+        train_indices = np.random.choice(remaining_indices, train_size, replace=False)
 
     if val_examples_per_class is not None:
         val_indices = sample_per_class(labels, val_examples_per_class, forbidden_indices=train_indices)
+    else:
+        remaining_indices = np.setdiff1d(remaining_indices, train_indices)
+        val_indices = np.random.choice(remaining_indices, val_size, replace=False)
 
     forbidden_indices = np.concatenate((train_indices, val_indices))
 
@@ -54,23 +61,5 @@ def get_split(labels, train_examples_per_class=None, val_examples_per_class=None
     if test_size is None and test_examples_per_class is None:
         # all indices must be part of the split
         assert len(np.concatenate((train_indices, val_indices, test_indices))) == num_samples
-
-    # if train_examples_per_class is not None:
-    #     train_labels = labels[train_indices, :]
-    #     train_sum = np.sum(train_labels, axis=0)
-    #     # assert all classes have equal cardinality
-    #     assert np.unique(train_sum).size == 1
-    #
-    # if val_examples_per_class is not None:
-    #     val_labels = labels[val_indices, :]
-    #     val_sum = np.sum(val_labels, axis=0)
-    #     # assert all classes have equal cardinality
-    #     assert np.unique(val_sum).size == 1
-    #
-    # if test_examples_per_class is not None:
-    #     test_labels = labels[test_indices, :]
-    #     test_sum = np.sum(test_labels, axis=0)
-    #     # assert all classes have equal cardinality
-    #     assert np.unique(test_sum).size == 1
 
     return train_indices, val_indices, test_indices
