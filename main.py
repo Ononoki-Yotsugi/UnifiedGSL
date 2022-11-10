@@ -24,7 +24,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--data', type=str, default='cora',
                         choices=['cora', 'pubmed', 'citeseer', 'raw_cora', 'ogbn-arxiv', 'amazoncom', 'amazonpho',
-                                 'coauthorcs', 'coauthorph', 'wikics'], help='dataset')
+                                 'coauthorcs', 'squirrel', 'coauthorph', 'wikics' , 'chameleon', 'cornell', 'texas', 'wisconsin', 'actor'], help='dataset')
     parser.add_argument('--solver', type=str, default='gcn',
                         choices=['gcndense', 'gat', 'prognn', 'gen', 'idgl', 'grcn', 'bcgsl'], help="The version of solver")
     parser.add_argument('--config', type=str, default='configs/gcn/gcn_template.yaml', help="Config file used for specific model training.")

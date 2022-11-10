@@ -117,6 +117,14 @@ def normalize_feat(mx):
     mx = r_mat_inv.dot(mx)
     return mx
 
+def normalize_feats(x):
+    rowsum = x.sum(1)
+    r_inv = rowsum.pow(-1).flatten()
+    r_inv[torch.isinf(r_inv)] = 0.
+    r_mat_inv = torch.diag(r_inv)
+    X = r_mat_inv @ x
+    return X
+
 class AverageMeter(object):
     """Computes and stores the average and current value.
 

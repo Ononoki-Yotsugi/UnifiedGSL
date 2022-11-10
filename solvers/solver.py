@@ -5,7 +5,7 @@ from data.pyg_load import pyg_load_dataset
 import dgl
 from data.split import get_split
 from dgl.data.utils import generate_mask_tensor
-from utils.utils import sample_mask, set_seed
+from utils.utils import sample_mask, set_seed, normalize_feats
 import numpy as np
 from utils.logger import Logger
 
@@ -19,7 +19,8 @@ class BaseSolver(nn.Module):
         self.prepare_data(args.data, mode=self.args.data_load)
         # self.split_seeds = [i for i in range(20)]
         self.train_seeds = [i for i in range(400)]
-        self.split_seeds = [103,219,977,678,527,549,368,945,573,920]
+        # self.split_seeds = [103,219,977,678,527,549,368,945,573,920]
+        self.split_seeds = [i for i in range(20)]
 
     def prepare_data(self, ds_name, mode='dgl'):
         if mode =='pyg':
@@ -36,6 +37,19 @@ class BaseSolver(nn.Module):
                 self.feats = self.feats.to(self.device)
                 self.labels = self.labels.to(self.device)
                 self.adj = self.adj.to(self.device)
+            if ds_name in ['chameleon', 'squirrel', 'cornell', 'texas', 'wisconsin', 'actor']:
+                # adj in these datasets need transforming to symmetric and removing self loop
+                adj = self.adj.to_dense()   # not very large
+                self.adj = adj + adj.T.multiply(adj.T > adj) - adj.multiply(adj.T > adj)
+                self.adj.fill_diagonal_(0)
+                self.adj = self.adj.to_sparse()
+                # normalize features
+                if 'not_norm_feats' in self.conf and self.conf.not_norm_feats:
+                    pass
+                else:
+                    self.feats = normalize_feats(self.feats)
+
+
         else:
             self.data_raw, g = load_dataset(ds_name)
             self.g = dgl.remove_self_loop(g)  # this operation is aimed to get a adj without self loop
@@ -59,7 +73,7 @@ class BaseSolver(nn.Module):
     def split_data(self, ds_name, seed, mode='dgl'):
         if ds_name in ['coauthorcs', 'coauthorph', 'amazoncom', 'amazonpho']:
             np.random.seed(seed)
-            train_indices, val_indices, test_indices = get_split(self.labels.cpu().numpy(), test_examples_per_class=30, val_examples_per_class=30)  # 默认采取20-30-rest这种划分
+            train_indices, val_indices, test_indices = get_split(self.labels.cpu().numpy(), train_examples_per_class=20, val_examples_per_class=30)  # 默认采取20-30-rest这种划分
             self.train_mask = generate_mask_tensor(sample_mask(train_indices, self.n_nodes))
             self.val_mask = generate_mask_tensor(sample_mask(val_indices, self.n_nodes))
             self.test_mask = generate_mask_tensor(sample_mask(test_indices, self.n_nodes))
@@ -76,7 +90,7 @@ class BaseSolver(nn.Module):
         elif ds_name in ['cora', 'citeseer', 'pubmed']:
             if 're_split' in self.conf and self.conf.re_split:
                 np.random.seed(seed)
-                train_indices, val_indices, test_indices = get_split(self.labels.cpu().numpy(), train_examples_per_class=20, val_size=500,test_size=1000)
+                train_indices, val_indices, test_indices = get_split(self.labels.cpu().numpy(), train_examples_per_class=20, val_size=500, test_size=1000)
                 self.train_mask = generate_mask_tensor(sample_mask(train_indices, self.n_nodes))
                 self.val_mask = generate_mask_tensor(sample_mask(val_indices, self.n_nodes))
                 self.test_mask = generate_mask_tensor(sample_mask(test_indices, self.n_nodes))
@@ -91,13 +105,18 @@ class BaseSolver(nn.Module):
                     self.test_mask = self.g.ndata['test_mask']
         elif ds_name == 'ogbn-arxiv':
             if mode == 'pyg':
-                self.train_mask = self.g.train_mask.to(self.device)
-                self.val_mask = self.g.val_mask.to(self.device)
-                self.test_mask = self.g.test_mask.to(self.device)
+                self.train_mask = self.g.train_mask
+                self.val_mask = self.g.val_mask
+                self.test_mask = self.g.test_mask
             else:
                 self.train_mask = self.g.ndata['train_mask']
                 self.val_mask = self.g.ndata['val_mask']
                 self.test_mask = self.g.ndata['test_mask']
+        elif ds_name in ['chameleon', 'squirrel', 'cornell', 'texas', 'wisconsin', 'actor']:
+            assert seed >=0 and seed <=9
+            self.train_mask = self.g.train_mask[:,seed]
+            self.val_mask = self.g.val_mask[:, seed]
+            self.test_mask = self.g.test_mask[:, seed]
         else:
             print('dataset not implemented')
             exit(0)
